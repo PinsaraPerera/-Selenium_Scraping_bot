@@ -1,43 +1,86 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from bs4 import BeautifulSoup
+import csv
 import time
 
-service = Service(executable_path="chromedriver.exe")
-driver = webdriver.Chrome(service=service)
-
-driver.get("https://www.google.com")
-
-WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.CLASS_NAME, "gLFyf")))
-
-input_element = driver.find_element(By.CLASS_NAME, "gLFyf")
-input_element.clear()
-input_element.send_keys("keells" + Keys.ENTER)
-
-WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.PARTIAL_LINK_TEXT, "Keells Online")))
-
-link = driver.find_element(By.PARTIAL_LINK_TEXT, "Keells Online")
-link.click()
-
-try:
-    button = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, '//*[@id="root"]/div/div[1]/div[3]/div[1]/div[2]/div/div/div[4]'))
+def get_market(driver):
+    driver.get("https://www.toyodiy.com/parts/q.html")
+    market = WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, "//select[@name='market']"))
     )
-    button.click()
-except:
-    print("The promo-product page was not found.")
+    return market
 
-try:
-    button = WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, '//*[@id="root"]/div/div[2]/div[2]/div[3]/div/div/div/div[1]/div[3]'))
+def get_years(driver):
+    driver.get("https://www.toyodiy.com/parts/q.html")
+    years = WebDriverWait(driver, 10).until(
+        EC.presence_of_all_elements_located((By.XPATH, "//tbody/tr/td/a"))
     )
-    button.click()
-except:
-    print("The individual product element was not found.")
+    return years
 
-time.sleep(5)
+def get_makes(driver, year):
+    year.click()
+    makes = WebDriverWait(driver, 10).until(
+        EC.presence_of_all_elements_located((By.XPATH, "//table/tbody/tr/td/a"))
+    )
+    return makes
 
-driver.quit()
+def get_models_and_frames(driver):
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    table = soup.find('table')
+    rows = table.find_all('tr')[1:]  # Skip header row
+    data = []
+    for row in rows:
+        cols = row.find_all('td')
+        model = cols[0].text.strip()
+        frame_codes = cols[1].text.strip()
+        data.append((model, frame_codes))
+    return data
+
+def main():
+    service = Service(executable_path="chromedriver.exe")
+    driver = webdriver.Chrome(service=service)
+
+    try:
+        years = get_years(driver)
+
+        with open('scraped_data.csv', 'w', newline='') as csvfile:
+            fieldnames = ['market', 'year', 'make', 'model', 'frame_codes']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            for year in years:
+                year_text = year.text
+                year.click()
+                time.sleep(2)  # wait for the page to load
+
+                makes = get_makes(driver, year)
+                for make in makes:
+                    make_text = make.text
+                    make.click()
+                    time.sleep(2)  # wait for the page to load
+
+                    data = get_models_and_frames(driver)
+                    for model, frame_codes in data:
+                        writer.writerow({
+                            'market': 'Japan',
+                            'year': year_text,
+                            'make': make_text,
+                            'model': model,
+                            'frame_codes': frame_codes
+                        })
+                    driver.back()  # go back to the year page
+                    time.sleep(2)
+
+                driver.back()  # go back to the initial page
+                time.sleep(2)
+
+    finally:
+        driver.quit()
+
+if __name__ == "__main__":
+    main()
+
